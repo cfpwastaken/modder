@@ -177,12 +177,13 @@ async function install(slugs, { add, version, loader, update }) {
       return;
     }
     let versions = await fetch(`https://api.modrinth.com/v2/project/${slug}/version?loaders=["${LOADER}"]`).then(res => res.json());
-    const version = versions.find(v => v.game_versions.includes(VERSION));
+    version = versions.find(v => v.game_versions.includes(VERSION));
     if(!version.loaders.includes(LOADER)) {
       spinner.fail(`${project.title} does not support ${LOADER}`);
       continue;
     }
     versions = await fetch(`https://api.modrinth.com/v2/project/${slug}/version?game_versions=["${VERSION}"]`).then(res => res.json());
+    version = versions.find(v => v.game_versions.includes(VERSION));
     if(version == undefined) {
       spinner.fail(`${project.title} does not support ${VERSION}`);
       continue;
