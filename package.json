@@ -1,0 +1,23 @@
+{
+  "name": "modder",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "type": "module",
+  "bin": {
+    "modder": "main.js"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "chalk": "^5.0.1",
+    "commander": "^9.2.0",
+    "node-fetch": "^3.2.3",
+    "node-html-parser": "^5.3.3",
+    "ora": "^6.1.0"
+  }
+}
