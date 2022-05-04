@@ -314,6 +314,7 @@ program
       return;
     }
     const profile = require(ROOT_DIR + "/profiles/" + config.selected_profile + ".json");
+    console.log(`Selected Profile name: ${config.selected_profile}`);
     console.log(`Selected Profile version: ${profile.version}`);
     console.log(`Selected Profile modloader: ${profile.loader}`);
     console.log(`Mod Count: ${profile.mods.length}`);
