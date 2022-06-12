@@ -52,24 +52,21 @@ function getModsDir() {
   return "";
 }
 
-async function downloadOptifine(path, version) {
-  spinner = ora("Fetching optifine versions").start();
+async function downloadOptifine(path, version, status) {
+  spinner.text = status + ": Fetching optifine versions";
   const versions = await fetch("https://optifine.net/downloads").then(res => res.text());
-  spinner.succeed();
   const vroot = parse(versions);
   const h2 = vroot.querySelector(`h2:contains("Minecraft ${version}")`);
   const url = h2.nextElementSibling.tagName == "TABLE" ? h2.nextElementSibling.querySelector("tr.downloadLine .colDownload a").attributes.href : h2.nextElementSibling.nextElementSibling.querySelector("tr.downloadLine .colDownload a").attributes.href;
   // const url = vroot.querySelector("table.mainTable tr.downloadLine .colDownload a").attributes.href;
   const predownloadURL = "http://optifine.net" + url.split("http://optifine.net").pop().split("&x=").shift();
-  spinner = ora("Fetching optifine download").start();
+  spinner.text = status + ": Fetching optifine download";
   const download = await fetch(predownloadURL).then(res => res.text());
-  spinner.succeed();
   const droot = parse(download);
   const downloadURL = droot.querySelector(".downloadButton a").attributes.href;
-  spinner = ora("Downloading optifine").start();
+  spinner.text = status + ": " + "Downloading optifine";
   const optifine = await fetch("https://optifine.net/" + downloadURL).then(res => res.arrayBuffer());
   writeFileSync(path, Buffer.from(optifine));
-  spinner.succeed();
 }
 
 function removeLinks() {
@@ -166,7 +163,7 @@ async function install(slugs, { add, version, loader, update }) {
 				failed.push({ slug, reason: "Optifine is only compatible with Forge" });
         continue;
       }
-      await downloadOptifine(ROOT_DIR + "/mods/optifine-" + VERSION + "-forge.jar", VERSION);
+      await downloadOptifine(ROOT_DIR + "/mods/optifine-" + VERSION + "-forge.jar", VERSION, status);
 
       if(add) {
         addToProfile(slug);
@@ -341,6 +338,29 @@ program
 			unlinkSync(ROOT_DIR + "/mods/" + mod + ".jar");
 		}
 		console.log("Removed " + unusedMods.length + " mod" + (unusedMods.length == 1 ? "" : "s"));
+	});
+
+program
+	.command("using <slug>")
+	.description("List profiles that use a mod")
+	.action(async (slug) => {
+		const allProfiles = readdirSync(ROOT_DIR + "/profiles");
+		const profiles = [];
+		for(let profile of allProfiles) {
+			if(!profile.endsWith(".json")) {
+				continue;
+			}
+			const profileData = require(ROOT_DIR + "/profiles/" + profile);
+			if(profileData.mods.includes(slug)) {
+				profiles.push(profile);
+			}
+		}
+		if(profiles.length == 0) {
+			console.log(chalk.red("No profiles use this mod"));
+		} else {
+			console.log("Profiles using this mod:");
+			console.log(profiles.map(p => chalk.cyan(p)).join(", "));
+		}
 	});
 
 program
