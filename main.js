@@ -154,13 +154,16 @@ async function install(slugs, { add, version, loader, update }) {
   const profile = require(ROOT_DIR + "/profiles/" + config.selected_profile + ".json");
   const VERSION = version || profile.version;
   const LOADER = loader || profile.loader;
-
+	const failed = [];
+	const skipped = [];
+	
+	spinner = ora("Installing").start();
   for(const slug of slugs) {
-    console.log(`Installing ${slug}`);
-    console.log("");
+		const status = `Installing ${slug} (${slugs.indexOf(slug) + 1}/${slugs.length}${failed.length > 0 ? `, ${failed.length} failed` : ""})`;
+		spinner.text = status;
     if(slug == "optifine") {
       if(LOADER !== "forge") {
-        console.error("Optifine is only compatible with Forge.");
+				failed.push({ slug, reason: "Optifine is only compatible with Forge" });
         continue;
       }
       await downloadOptifine(ROOT_DIR + "/mods/optifine-" + VERSION + "-forge.jar", VERSION);
@@ -170,28 +173,37 @@ async function install(slugs, { add, version, loader, update }) {
       }
       continue;
     }
-    spinner = ora("Fetching mod info").start();
-    const project = await fetch(`https://api.modrinth.com/v2/project/${slug}`).then(res => res.json());
+		spinner.text = status + ": Fetching mod info";
+		let project;
+		try {
+			project = await fetch(`https://api.modrinth.com/v2/project/${slug}`).then(res => res.json())
+		} catch(e) {
+			failed.push({ slug, reason: "Failed to fetch mod info" });
+			continue;
+		}
     if(project.client_side == "unsupported") {
-      console.log(`${project.title} is not available for the minecraft client.`);
+			failed.push({ slug, reason: `${project.title} is not available for the minecraft client.` });
       return;
     }
+		spinner.text = status + ": Checking loader";
     let versions = await fetch(`https://api.modrinth.com/v2/project/${slug}/version?loaders=["${LOADER}"]`).then(res => res.json());
     if(versions.length == 0) {
-      spinner.fail(`${project.title} does not support ${LOADER}`);
+			failed.push({ slug, reason: `${project.title} does not support ${LOADER}` });
       continue;
     }
+		spinner.text = status + ": Checking version";
     versions = await fetch(`https://api.modrinth.com/v2/project/${slug}/version?game_versions=["${VERSION}"]`).then(res => res.json());
     if(versions.length == 0) {
-      spinner.fail(`${project.title} does not support ${VERSION}`);
+			failed.push({ slug, reason: `${project.title} does not support ${VERSION}` });
       continue;
     }
+		spinner.text = status + ": Getting version";
     versions = await fetch(`https://api.modrinth.com/v2/project/${slug}/version?loaders=["${LOADER}"]&game_versions=["${VERSION}"]`).then(res => res.json());
     let file = versions[0].files.find(f => f.primary);
     if(file == undefined) {
       file = versions[0].files[0];
       if(file == undefined) {
-        spinner.fail(`${project.title} does not have a file for ${VERSION}`);
+				failed.push({ slug, reason: `${project.title} does not have a file for ${VERSION}` });
         continue;
       }
     }
@@ -199,23 +211,19 @@ async function install(slugs, { add, version, loader, update }) {
       if(update) {
         unlinkSync(`${ROOT_DIR}/mods/${project.slug}-${VERSION}-${LOADER}.jar`);
       } else if(add) {
-        spinner.succeed();
         addToProfile(slug);
+				skipped.push(slug);
         continue;
       } else {
-        spinner.succeed();
-        console.error("Mod already installed and not added to profile");
+				skipped.push(slug);
         continue;
       }
     }
-    spinner.succeed();
 
-    spinner = ora("Downloading mod").start();
+		spinner.text = `${status}: Downloading ${project.title}`;
     const mod = await fetch(file.url).then(res => res.arrayBuffer());
-    spinner.succeed();
-    spinner = ora("Writing mod").start();
+		spinner.text = `${status}: Writing mod to disk`;
     writeFileSync(`${ROOT_DIR}/mods/${slug}-${VERSION}-${LOADER}.jar`, Buffer.from(mod));
-    spinner.succeed();
 
     // TODO
     // if(version.dependencies.length !== 0) {
@@ -248,10 +256,21 @@ async function install(slugs, { add, version, loader, update }) {
       addToProfile(slug);
     }
   }
-}
-
-function installModsFromProfiles() {
-
+	
+	if(failed.length == slugs.length) {
+		spinner.fail(`Failed to install all mods`);
+	} else if(failed.length > 0) {
+		spinner.warn(`Failed to install ${failed.length} mods`);
+	} else {
+		spinner.succeed(`Installed all mods`);
+		return;
+	}
+	console.log("Failed to install:");
+	console.log(failed.map(f => `${chalk.cyan(f.slug)}: ${chalk.red(f.reason)}`).join("\n"));
+	if(skipped.length > 0) {
+		console.log("Skipped:");
+		console.log(chalk.gray(skipped.join(", ")));
+	}
 }
 
 const program = new Command().name("modder").version("1.0");
@@ -280,6 +299,49 @@ program
     }
   });
 
+program
+	.command("remove [slugs...]")
+	.description("Remove a mod from profile")
+	.action(async (slugs) => {
+		if(config.selected_profile == null) {
+			console.error("No profile selected. Please select a profile with `modder switch <profile>` or use the --profile option.");
+			return;
+		}
+		const profile = require(ROOT_DIR + "/profiles/" + config.selected_profile + ".json");
+		for(let slug of slugs) {
+			profile.mods = profile.mods.filter(m => m != slug);
+		}
+		writeFileSync(ROOT_DIR + "/profiles/" + config.selected_profile + ".json", JSON.stringify(profile, null, 2));
+		updateModsDir();
+	});
+
+program
+	.command("refresh")
+	.description("Refresh symlinked mods")
+	.action(() => {
+		updateModsDir();
+	});
+
+program
+	.command("clean")
+	.description("Remove unused mods")
+	.action(() => {
+		const allProfiles = readdirSync(ROOT_DIR + "/profiles");
+		const allMods = readdirSync(ROOT_DIR + "/mods").map(m => m.replace(".jar", ""));
+		const allUsedMods = [];
+		for(let profile of allProfiles) {
+			if(!profile.endsWith(".json")) {
+				continue;
+			}
+			const profileData = require(ROOT_DIR + "/profiles/" + profile);
+			allUsedMods.push(...profileData.mods.map(m => m + "-" + profileData.version + "-" + profileData.loader));
+		}
+		const unusedMods = allMods.filter(m => !allUsedMods.includes(m));
+		for(let mod of unusedMods) {
+			unlinkSync(ROOT_DIR + "/mods/" + mod + ".jar");
+		}
+		console.log("Removed " + unusedMods.length + " mod" + (unusedMods.length == 1 ? "" : "s"));
+	});
 
 program
   .command("search <mod>")
